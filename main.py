@@ -66,7 +66,7 @@ async def send_email(whatsapp: str, produto: str):
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
             json={
-                "from": "PROkura <noreply@prokura.ao>",
+                "from": "PROkura <onboarding@resend.dev>",
                 "to": [ADMIN_EMAIL],
                 "subject": f"Novo pedido — {produto[:40]}",
                 "html": f"""
