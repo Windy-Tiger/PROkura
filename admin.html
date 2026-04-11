@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PROkura · Admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', sans-serif; background: #fafaf8; color: #1a1a1a; min-height: 100vh; padding: 2rem 1.5rem; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; max-width: 900px; margin-left: auto; margin-right: auto; }
+    .brand { font-family: 'Cormorant Garamond', serif; font-size: 28px; font-weight: 300; letter-spacing: 0.15em; text-transform: uppercase; }
+    .brand .pro { font-weight: 400; color: #1a1a1a; }
+    .brand .kura { color: #c0392b; }
+    .stats { display: flex; gap: 12px; }
+    .stat { background: #f5f3ef; border-radius: 4px; padding: 8px 16px; text-align: center; }
+    .stat-num { font-size: 20px; font-weight: 500; color: #1a1a1a; }
+    .stat-label { font-size: 11px; color: #aaa; letter-spacing: 0.05em; }
+    .filters { display: flex; gap: 8px; margin-bottom: 1.5rem; max-width: 900px; margin-left: auto; margin-right: auto; }
+    .filter-btn { padding: 6px 16px; border: 0.5px solid #ccc; border-radius: 100px; background: transparent; font-family: 'DM Sans', sans-serif; font-size: 12px; cursor: pointer; letter-spacing: 0.04em; transition: all 0.15s; }
+    .filter-btn.active { background: #1a1a1a; color: #fafaf8; border-color: #1a1a1a; }
+    .login-wrap { max-width: 340px; margin: 4rem auto; text-align: center; }
+    .login-wrap h2 { font-family: 'Cormorant Garamond', serif; font-size: 24px; font-weight: 300; margin-bottom: 1.5rem; }
+    input[type="password"] { width: 100%; border: none; border-bottom: 0.5px solid #ccc; padding: 12px 0; font-family: 'DM Sans', sans-serif; font-size: 15px; background: transparent; outline: none; margin-bottom: 12px; }
+    .btn-login { width: 100%; padding: 13px; background: #1a1a1a; color: #fafaf8; border: none; border-radius: 2px; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+    .table-wrap { max-width: 900px; margin: 0 auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th { font-size: 10px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: #aaa; padding: 8px 12px; text-align: left; border-bottom: 0.5px solid #eee; }
+    td { padding: 12px; border-bottom: 0.5px solid #f0ede8; font-size: 13px; vertical-align: middle; }
+    tr:hover td { background: #f9f8f6; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 100px; font-size: 10px; font-weight: 500; letter-spacing: 0.05em; }
+    .badge-pendente { background: #faeeda; color: #854F0B; }
+    .badge-respondido { background: #eaf3de; color: #3B6D11; }
+    .wa-link { color: #25D366; text-decoration: none; font-weight: 500; }
+    .wa-link:hover { text-decoration: underline; }
+    .btn-resp { padding: 5px 12px; background: #1a1a1a; color: #fafaf8; border: none; border-radius: 2px; font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 0.05em; cursor: pointer; transition: opacity 0.15s; }
+    .btn-resp:hover { opacity: 0.75; }
+    .empty { text-align: center; padding: 3rem; color: #aaa; font-size: 14px; }
+    .copy-btn { padding: 4px 10px; border: 0.5px solid #ddd; border-radius: 100px; background: transparent; font-family: 'DM Sans', sans-serif; font-size: 11px; color: #888; cursor: pointer; margin-left: 6px; transition: all 0.15s; }
+    .copy-btn:hover { border-color: #1a1a1a; color: #1a1a1a; }
+  </style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-wrap">
+    <div class="brand" style="margin-bottom:2rem;display:block;text-align:center"><span class="pro">PRO</span><span class="kura">kura</span></div>
+    <h2>Painel Admin</h2>
+    <input type="password" id="pwd-input" placeholder="Password" onkeydown="if(event.key==='Enter')login()"/>
+    <button class="btn-login" onclick="login()">Entrar</button>
+    <p id="login-err" style="color:#c0392b;font-size:12px;margin-top:8px"></p>
+  </div>
+</div>
+
+<div id="dashboard" style="display:none">
+  <div class="header">
+    <div class="brand"><span class="pro">PRO</span><span class="kura">kura</span> <span style="font-family:'DM Sans';font-size:14px;color:#aaa;letter-spacing:0;font-weight:400">· Admin</span></div>
+    <div class="stats">
+      <div class="stat"><div class="stat-num" id="total-count">0</div><div class="stat-label">Total</div></div>
+      <div class="stat"><div class="stat-num" id="pendente-count" style="color:#b7860b">0</div><div class="stat-label">Pendentes</div></div>
+      <div class="stat"><div class="stat-num" id="respondido-count" style="color:#3B6D11">0</div><div class="stat-label">Respondidos</div></div>
+    </div>
+  </div>
+
+  <div class="filters" style="margin-bottom:1.5rem">
+    <button class="filter-btn active" onclick="loadPedidos('')" id="f-todos">Todos</button>
+    <button class="filter-btn" onclick="loadPedidos('pendente')" id="f-pendentes">Pendentes</button>
+    <button class="filter-btn" onclick="loadPedidos('respondido')" id="f-respondidos">Respondidos</button>
+    <button class="filter-btn" onclick="loadPedidos('')" style="margin-left:auto">↻ Actualizar</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Data</th>
+          <th>WhatsApp</th>
+          <th>Produto</th>
+          <th>Estado</th>
+          <th>Ação</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty" id="empty" style="display:none">Sem pedidos ainda.</div>
+  </div>
+</div>
+
+<script>
+  const API = window.location.origin;
+  let pwd = '';
+  let allPedidos = [];
+
+  function login() {
+    pwd = document.getElementById('pwd-input').value;
+    loadPedidos('');
+  }
+
+  async function loadPedidos(estado) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    const map = {'':'f-todos','pendente':'f-pendentes','respondido':'f-respondidos'};
+    if(map[estado]) document.getElementById(map[estado]).classList.add('active');
+
+    try {
+      const url = `${API}/admin/pedidos?password=${encodeURIComponent(pwd)}&estado=${estado}`;
+      const res = await fetch(url);
+      if (res.status === 401) { document.getElementById('login-err').textContent = 'Password incorrecta.'; return; }
+      const data = await res.json();
+      allPedidos = data;
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      renderTable(data);
+      updateStats();
+    } catch(e) {
+      document.getElementById('login-err').textContent = 'Erro de ligação.';
+    }
+  }
+
+  async function updateStats() {
+    const res = await fetch(`${API}/admin/pedidos?password=${encodeURIComponent(pwd)}`);
+    const all = await res.json();
+    document.getElementById('total-count').textContent = all.length;
+    document.getElementById('pendente-count').textContent = all.filter(p=>p.estado==='pendente').length;
+    document.getElementById('respondido-count').textContent = all.filter(p=>p.estado==='respondido').length;
+  }
+
+  function renderTable(data) {
+    const tbody = document.getElementById('tbody');
+    const empty = document.getElementById('empty');
+    if (!data.length) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+    tbody.innerHTML = data.map(p => {
+      const data_fmt = new Date(p.criado_em).toLocaleDateString('pt-PT', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const wa_num = p.whatsapp.startsWith('244') ? p.whatsapp : '244' + p.whatsapp;
+      const wa_msg = encodeURIComponent(`Olá! 👋\n\nRecebemos o teu pedido de *${p.produto}*.\n\nEstamos já a pesquisar nas melhores fontes em Luanda e respondemos com a cotação completa em menos de 24 horas.\n\nEquipa PROkura 🔍\nprokura.ao`);
+      return `<tr>
+        <td style="color:#bbb;font-size:12px">#${p.id}</td>
+        <td style="color:#888;font-size:12px">${data_fmt}</td>
+        <td>
+          <a class="wa-link" href="https://wa.me/${wa_num}?text=${wa_msg}" target="_blank">+${wa_num}</a>
+          <button class="copy-btn" onclick="copyNum('${wa_num}')">Copiar</button>
+        </td>
+        <td style="font-weight:500;max-width:220px">${p.produto}</td>
+        <td><span class="badge badge-${p.estado}">${p.estado}</span></td>
+        <td>${p.estado === 'pendente' ? `<button class="btn-resp" onclick="responder(${p.id})">Respondido</button>` : `<span style="font-size:11px;color:#aaa">${p.respondido_em ? new Date(p.respondido_em).toLocaleDateString('pt-PT') : ''}</span>`}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  async function responder(id) {
+    await fetch(`${API}/admin/pedidos/${id}/responder?password=${encodeURIComponent(pwd)}`, {method:'PUT'});
+    loadPedidos('');
+  }
+
+  function copyNum(num) {
+    navigator.clipboard.writeText('+' + num);
+  }
+</script>
+</body>
+</html>
