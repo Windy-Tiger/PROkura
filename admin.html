@@ -109,11 +109,15 @@
     tr.main-row { cursor: pointer; }
     tr.main-row:hover td { background: #f9f8f6; }
     .expand-icon {
-      font-size: 10px; color: #bbb;
+      font-size: 12px; color: #888;
       transition: transform 0.2s;
       display: inline-block;
+      margin-left: 4px;
+      font-style: normal;
+      user-select: none;
     }
-    .expand-icon.open { transform: rotate(180deg); }
+    .expand-icon.open { transform: rotate(180deg); color: #c0392b; }
+    tr.main-row td:first-child { white-space: nowrap; }
 
     @media (max-width: 768px) {
       body { padding: 1rem; }
