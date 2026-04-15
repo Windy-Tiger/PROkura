@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from datetime import datetime
@@ -13,6 +12,8 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./prokura.db")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "prokura697@gmail.com")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "prokura2026")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+GOOGLE_CX = os.getenv("GOOGLE_CX", "")
 
 database = databases.Database(DATABASE_URL)
 metadata = sqlalchemy.MetaData()
@@ -26,6 +27,7 @@ pedidos = sqlalchemy.Table(
     sqlalchemy.Column("criado_em", sqlalchemy.DateTime, default=datetime.utcnow),
     sqlalchemy.Column("respondido_em", sqlalchemy.DateTime, nullable=True),
     sqlalchemy.Column("notas", sqlalchemy.String, nullable=True),
+    sqlalchemy.Column("google_resultados", sqlalchemy.Integer, nullable=True),
 )
 
 engine = sqlalchemy.create_engine(
@@ -46,9 +48,6 @@ class PedidoInput(BaseModel):
     whatsapp: str
     message: str
 
-class AdminLogin(BaseModel):
-    password: str
-
 @app.on_event("startup")
 async def startup():
     await database.connect()
@@ -57,10 +56,33 @@ async def startup():
 async def shutdown():
     await database.disconnect()
 
-async def send_email(whatsapp: str, produto: str):
+async def google_search(produto: str) -> int:
+    if not GOOGLE_API_KEY or not GOOGLE_CX:
+        return -1
+    try:
+        query = f"{produto} Luanda Angola"
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={
+                    "key": GOOGLE_API_KEY,
+                    "cx": GOOGLE_CX,
+                    "q": query,
+                    "num": 1
+                }
+            )
+            data = r.json()
+            total = int(data.get("searchInformation", {}).get("totalResults", 0))
+            return total
+    except Exception as e:
+        print(f"Google search error: {e}")
+        return -1
+
+async def send_email(whatsapp: str, produto: str, google_count: int):
     if not RESEND_API_KEY:
         print(f"EMAIL: Novo pedido de {whatsapp} — {produto}")
         return
+    google_text = f"{google_count:,} resultados" if google_count >= 0 else "A pesquisar..."
     async with httpx.AsyncClient() as client:
         await client.post(
             "https://api.resend.com/emails",
@@ -77,14 +99,11 @@ async def send_email(whatsapp: str, produto: str):
                         <td style="padding:8px;font-weight:500">+{whatsapp}</td></tr>
                     <tr style="background:#f5f3ef"><td style="padding:8px;color:#888">Produto</td>
                         <td style="padding:8px;font-weight:500">{produto}</td></tr>
-                    <tr><td style="padding:8px;color:#888">Data</td>
+                    <tr><td style="padding:8px;color:#888">Google</td>
+                        <td style="padding:8px">{google_text} em Angola/Luanda</td></tr>
+                    <tr style="background:#f5f3ef"><td style="padding:8px;color:#888">Data</td>
                         <td style="padding:8px">{datetime.now().strftime('%d/%m/%Y %H:%M')}</td></tr>
                   </table>
-                  <div style="margin-top:20px;padding:12px;background:#fafaf8;border:1px solid #eee;border-radius:4px">
-                    <p style="margin:0;font-size:13px;color:#888">
-                      Abre o WhatsApp e envia a confirmação para <strong>+{whatsapp}</strong>
-                    </p>
-                  </div>
                   <p style="color:#c0392b;font-size:12px;margin-top:16px">PROkura · prokura.ao</p>
                 </div>
                 """
@@ -94,15 +113,25 @@ async def send_email(whatsapp: str, produto: str):
 @app.post("/pedido")
 async def criar_pedido(pedido: PedidoInput):
     phone = pedido.whatsapp.replace("+", "").replace(" ", "").replace("-", "")
+
+    # Google search primeiro
+    google_count = await google_search(pedido.message)
+
     query = pedidos.insert().values(
         whatsapp=phone,
         produto=pedido.message,
         estado="pendente",
-        criado_em=datetime.utcnow()
+        criado_em=datetime.utcnow(),
+        google_resultados=google_count if google_count >= 0 else None
     )
     pedido_id = await database.execute(query)
-    await send_email(phone, pedido.message)
-    return {"success": True, "id": pedido_id}
+    await send_email(phone, pedido.message, google_count)
+
+    return {
+        "success": True,
+        "id": pedido_id,
+        "google_resultados": google_count
+    }
 
 @app.get("/admin/pedidos")
 async def listar_pedidos(password: str = "", estado: str = ""):
