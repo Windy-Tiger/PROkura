@@ -12,8 +12,9 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./prokura.db")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "prokura697@gmail.com")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "prokura2026")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GOOGLE_CX = os.getenv("GOOGLE_CX", "")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
+
+SEARCH_LIMIT_PER_MONTH = 200
 
 database = databases.Database(DATABASE_URL)
 metadata = sqlalchemy.MetaData()
@@ -56,33 +57,50 @@ async def startup():
 async def shutdown():
     await database.disconnect()
 
-async def google_search(produto: str) -> int:
-    if not GOOGLE_API_KEY or not GOOGLE_CX:
+async def get_monthly_search_count() -> int:
+    now = datetime.utcnow()
+    start_of_month = datetime(now.year, now.month, 1)
+    query = sqlalchemy.select(
+        sqlalchemy.func.count()
+    ).select_from(pedidos).where(
+        sqlalchemy.and_(
+            pedidos.c.criado_em >= start_of_month,
+            pedidos.c.google_resultados != None
+        )
+    )
+    result = await database.fetch_val(query)
+    return result or 0
+
+async def serp_search(produto: str) -> int:
+    if not SERPAPI_KEY:
         return -1
     try:
         query = f"{produto} Luanda Angola"
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
-                "https://www.googleapis.com/customsearch/v1",
+                "https://serpapi.com/search",
                 params={
-                    "key": GOOGLE_API_KEY,
-                    "cx": GOOGLE_CX,
+                    "api_key": SERPAPI_KEY,
+                    "engine": "google",
                     "q": query,
-                    "num": 1
+                    "num": 1,
+                    "gl": "ao",
+                    "hl": "pt"
                 }
             )
             data = r.json()
-            total = int(data.get("searchInformation", {}).get("totalResults", 0))
+            total_str = data.get("search_information", {}).get("total_results", "0")
+            total = int(str(total_str).replace(",", "").replace(".", "").split()[0]) if total_str else 0
             return total
     except Exception as e:
-        print(f"Google search error: {e}")
+        print(f"SerpAPI search error: {e}")
         return -1
 
 async def send_email(whatsapp: str, produto: str, google_count: int):
     if not RESEND_API_KEY:
         print(f"EMAIL: Novo pedido de {whatsapp} — {produto}")
         return
-    google_text = f"{google_count:,} resultados" if google_count >= 0 else "A pesquisar..."
+    google_text = f"{google_count:,} resultados".replace(",", ".") if google_count > 0 else "A pesquisar..."
     async with httpx.AsyncClient() as client:
         await client.post(
             "https://api.resend.com/emails",
@@ -99,8 +117,8 @@ async def send_email(whatsapp: str, produto: str, google_count: int):
                         <td style="padding:8px;font-weight:500">+{whatsapp}</td></tr>
                     <tr style="background:#f5f3ef"><td style="padding:8px;color:#888">Produto</td>
                         <td style="padding:8px;font-weight:500">{produto}</td></tr>
-                    <tr><td style="padding:8px;color:#888">Google</td>
-                        <td style="padding:8px">{google_text} em Angola/Luanda</td></tr>
+                    <tr><td style="padding:8px;color:#888">Google Angola</td>
+                        <td style="padding:8px">{google_text}</td></tr>
                     <tr style="background:#f5f3ef"><td style="padding:8px;color:#888">Data</td>
                         <td style="padding:8px">{datetime.now().strftime('%d/%m/%Y %H:%M')}</td></tr>
                   </table>
@@ -114,8 +132,12 @@ async def send_email(whatsapp: str, produto: str, google_count: int):
 async def criar_pedido(pedido: PedidoInput):
     phone = pedido.whatsapp.replace("+", "").replace(" ", "").replace("-", "")
 
-    # Google search primeiro
-    google_count = await google_search(pedido.message)
+    monthly_count = await get_monthly_search_count()
+    if monthly_count < SEARCH_LIMIT_PER_MONTH:
+        google_count = await serp_search(pedido.message)
+    else:
+        print(f"Limite mensal atingido ({monthly_count}/{SEARCH_LIMIT_PER_MONTH})")
+        google_count = -1
 
     query = pedidos.insert().values(
         whatsapp=phone,
@@ -157,7 +179,13 @@ async def marcar_respondido(pedido_id: int, password: str = "", notas: str = "")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    monthly_count = await get_monthly_search_count()
+    return {
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat(),
+        "searches_this_month": monthly_count,
+        "search_limit": SEARCH_LIMIT_PER_MONTH
+    }
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_panel():
