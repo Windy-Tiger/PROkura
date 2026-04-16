@@ -6,6 +6,7 @@ from datetime import datetime
 import databases
 import sqlalchemy
 import httpx
+import asyncio
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./prokura.db")
@@ -29,6 +30,8 @@ pedidos = sqlalchemy.Table(
     sqlalchemy.Column("respondido_em", sqlalchemy.DateTime, nullable=True),
     sqlalchemy.Column("notas", sqlalchemy.String, nullable=True),
     sqlalchemy.Column("google_resultados", sqlalchemy.Integer, nullable=True),
+    sqlalchemy.Column("instagram_resultados", sqlalchemy.Integer, nullable=True),
+    sqlalchemy.Column("tiktok_resultados", sqlalchemy.Integer, nullable=True),
 )
 
 engine = sqlalchemy.create_engine(
@@ -71,18 +74,15 @@ async def get_monthly_search_count() -> int:
     result = await database.fetch_val(query)
     return result or 0
 
-async def serp_search(produto: str) -> int:
-    if not SERPAPI_KEY:
-        return -1
+async def serp_google(produto: str) -> int:
     try:
-        query = f"{produto} Luanda Angola"
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(
                 "https://serpapi.com/search",
                 params={
                     "api_key": SERPAPI_KEY,
                     "engine": "google",
-                    "q": query,
+                    "q": f"{produto} Luanda Angola",
                     "num": 1,
                     "gl": "ao",
                     "hl": "pt"
@@ -90,17 +90,59 @@ async def serp_search(produto: str) -> int:
             )
             data = r.json()
             total_str = data.get("search_information", {}).get("total_results", "0")
-            total = int(str(total_str).replace(",", "").replace(".", "").split()[0]) if total_str else 0
-            return total
+            return int(str(total_str).replace(",", "").replace(".", "").split()[0]) if total_str else 0
     except Exception as e:
-        print(f"SerpAPI search error: {e}")
+        print(f"Google search error: {e}")
         return -1
 
-async def send_email(whatsapp: str, produto: str, google_count: int):
+async def serp_instagram(produto: str) -> int:
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://serpapi.com/search",
+                params={
+                    "api_key": SERPAPI_KEY,
+                    "engine": "google",
+                    "q": f"{produto} Angola fonte site:instagram.com",
+                    "num": 1,
+                    "gl": "ao",
+                    "hl": "pt"
+                }
+            )
+            data = r.json()
+            total_str = data.get("search_information", {}).get("total_results", "0")
+            return int(str(total_str).replace(",", "").replace(".", "").split()[0]) if total_str else 0
+    except Exception as e:
+        print(f"Instagram search error: {e}")
+        return -1
+
+async def serp_tiktok(produto: str) -> int:
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://serpapi.com/search",
+                params={
+                    "api_key": SERPAPI_KEY,
+                    "engine": "google",
+                    "q": f"{produto} Angola fonte site:tiktok.com",
+                    "num": 1,
+                    "gl": "ao",
+                    "hl": "pt"
+                }
+            )
+            data = r.json()
+            total_str = data.get("search_information", {}).get("total_results", "0")
+            return int(str(total_str).replace(",", "").replace(".", "").split()[0]) if total_str else 0
+    except Exception as e:
+        print(f"TikTok search error: {e}")
+        return -1
+
+async def send_email(whatsapp: str, produto: str, google: int, insta: int, tiktok: int):
     if not RESEND_API_KEY:
         print(f"EMAIL: Novo pedido de {whatsapp} — {produto}")
         return
-    google_text = f"{google_count:,} resultados".replace(",", ".") if google_count > 0 else "A pesquisar..."
+    def fmt(n):
+        return f"{n:,} resultados".replace(",", ".") if n > 0 else "Em curso..."
     async with httpx.AsyncClient() as client:
         await client.post(
             "https://api.resend.com/emails",
@@ -118,7 +160,11 @@ async def send_email(whatsapp: str, produto: str, google_count: int):
                     <tr style="background:#f5f3ef"><td style="padding:8px;color:#888">Produto</td>
                         <td style="padding:8px;font-weight:500">{produto}</td></tr>
                     <tr><td style="padding:8px;color:#888">Google Angola</td>
-                        <td style="padding:8px">{google_text}</td></tr>
+                        <td style="padding:8px">{fmt(google)}</td></tr>
+                    <tr style="background:#f5f3ef"><td style="padding:8px;color:#888">Instagram</td>
+                        <td style="padding:8px">{fmt(insta)}</td></tr>
+                    <tr><td style="padding:8px;color:#888">TikTok</td>
+                        <td style="padding:8px">{fmt(tiktok)}</td></tr>
                     <tr style="background:#f5f3ef"><td style="padding:8px;color:#888">Data</td>
                         <td style="padding:8px">{datetime.now().strftime('%d/%m/%Y %H:%M')}</td></tr>
                   </table>
@@ -133,26 +179,36 @@ async def criar_pedido(pedido: PedidoInput):
     phone = pedido.whatsapp.replace("+", "").replace(" ", "").replace("-", "")
 
     monthly_count = await get_monthly_search_count()
-    if monthly_count < SEARCH_LIMIT_PER_MONTH:
-        google_count = await serp_search(pedido.message)
+
+    if monthly_count < SEARCH_LIMIT_PER_MONTH and SERPAPI_KEY:
+        # Run all 3 searches in parallel — counts as 3 searches
+        google, insta, tiktok = await asyncio.gather(
+            serp_google(pedido.message),
+            serp_instagram(pedido.message),
+            serp_tiktok(pedido.message)
+        )
     else:
         print(f"Limite mensal atingido ({monthly_count}/{SEARCH_LIMIT_PER_MONTH})")
-        google_count = -1
+        google, insta, tiktok = -1, -1, -1
 
     query = pedidos.insert().values(
         whatsapp=phone,
         produto=pedido.message,
         estado="pendente",
         criado_em=datetime.utcnow(),
-        google_resultados=google_count if google_count >= 0 else None
+        google_resultados=google if google >= 0 else None,
+        instagram_resultados=insta if insta >= 0 else None,
+        tiktok_resultados=tiktok if tiktok >= 0 else None,
     )
     pedido_id = await database.execute(query)
-    await send_email(phone, pedido.message, google_count)
+    await send_email(phone, pedido.message, google, insta, tiktok)
 
     return {
         "success": True,
         "id": pedido_id,
-        "google_resultados": google_count
+        "google_resultados": google,
+        "instagram_resultados": insta,
+        "tiktok_resultados": tiktok,
     }
 
 @app.get("/admin/pedidos")
