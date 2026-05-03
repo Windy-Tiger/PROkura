@@ -302,27 +302,14 @@ async def send_email(whatsapp: str, produto: str, google: int, insta: int, tikto
 async def criar_pedido(pedido: PedidoInput):
     phone = pedido.whatsapp.replace("+", "").replace(" ", "").replace("-", "")
 
-    monthly_count = await get_monthly_search_count()
-
-    if monthly_count < SEARCH_LIMIT_PER_MONTH and SERPAPI_KEY:
-        # Run all 3 searches in parallel — counts as 3 searches
-        google, insta, tiktok = await asyncio.gather(
-            serp_google(pedido.message),
-            serp_instagram(pedido.message),
-            serp_tiktok(pedido.message)
-        )
-    else:
-        print(f"Limite mensal atingido ({monthly_count}/{SEARCH_LIMIT_PER_MONTH})")
-        google, insta, tiktok = -1, -1, -1
-
     query = pedidos.insert().values(
         whatsapp=phone,
         produto=pedido.message,
         estado="pendente",
         criado_em=datetime.utcnow(),
-        google_resultados=google if google >= 0 else None,
-        instagram_resultados=insta if insta >= 0 else None,
-        tiktok_resultados=tiktok if tiktok >= 0 else None,
+        google_resultados=None,
+        instagram_resultados=None,
+        tiktok_resultados=None,
         codigo=None,
     )
     pedido_id = await database.execute(query)
@@ -330,15 +317,12 @@ async def criar_pedido(pedido: PedidoInput):
     await database.execute(
         pedidos.update().where(pedidos.c.id == pedido_id).values(codigo=codigo)
     )
-    await send_email(phone, pedido.message, google, insta, tiktok)
+    await send_email(phone, pedido.message, 0, 0, 0)
 
     return {
         "success": True,
         "id": pedido_id,
         "codigo": codigo,
-        "google_resultados": google,
-        "instagram_resultados": insta,
-        "tiktok_resultados": tiktok,
     }
 
 @app.get("/admin/pedidos/{codigo}/pdf")
